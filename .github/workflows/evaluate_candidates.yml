@@ -1,0 +1,242 @@
+name: Algorithm Evaluator Pool
+
+on:
+  # Triggered when a new branch with the prefix 'evolve/' is pushed
+  push:
+    branches:
+      - 'evolve/**'
+  
+  # Allow manual triggers for testing
+  workflow_dispatch:
+    inputs:
+      branches:
+        description: 'Comma-separated list of branches to evaluate'
+        required: false
+        default: 'experiment_ensemble,evolve-*'
+
+jobs:
+  # First job: Discover branches to evaluate
+  discover_branches:
+    runs-on: ubuntu-latest
+    outputs:
+      branches: ${{ steps.set-branches.outputs.branches }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Fetch all history and branches
+      
+      - name: Get branches to evaluate
+        id: set-branches
+        run: |
+          if [[ -n "${{ github.event.inputs.branches }}" ]]; then
+            # Use manually specified branches for workflow_dispatch
+            BRANCHES="${{ github.event.inputs.branches }}"
+          else
+            # Get evolve branches plus experiment_ensemble branch
+            BRANCHES=$(git branch -r | grep -E 'origin/(evolve|experiment_ensemble)' | sed 's#origin/##' | tr '\n' ',' | sed 's/,$//')
+          fi
+          echo "branches=${BRANCHES}" >> $GITHUB_OUTPUT
+          echo "Branches to evaluate: ${BRANCHES}"
+
+  # Second job: Evaluate each branch in parallel
+  evaluate:
+    needs: discover_branches
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        branch: ${{ fromJson(format('[{0}]', needs.discover_branches.outputs.branches)) }}
+        # Optional: Add more dimensions to the matrix if needed
+        # python-version: [3.8, 3.9]
+      fail-fast: false  # Continue evaluating other branches even if one fails
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Fetch all history
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-benchmark tabulate
+      
+      - name: Create worktree for branch
+        run: |
+          echo "Setting up worktree for ${{ matrix.branch }}"
+          # Create a unique directory name for this branch's worktree
+          WORKTREE_DIR="../candidate-${{ matrix.branch }}"
+          git worktree add $WORKTREE_DIR ${{ matrix.branch }}
+          echo "WORKTREE_DIR=${WORKTREE_DIR}" >> $GITHUB_ENV
+      
+      - name: Run unit tests
+        id: unit_tests
+        continue-on-error: true  # Don't fail the whole job if tests fail
+        run: |
+          cd $WORKTREE_DIR
+          python -m pytest test_model.py -v | tee test_output.log
+          echo "test_success=$?" >> $GITHUB_OUTPUT
+      
+      - name: Run benchmarks
+        id: benchmarks
+        run: |
+          cd $WORKTREE_DIR
+          # Run performance benchmarks
+          python benchmark.py
+          
+          # Run component benchmarks
+          python benchmark_metrics.py
+          
+          # Run pytest benchmarks and save to JSON
+          python -m pytest test_benchmarks.py --benchmark-json pytest_benchmark.json
+          
+          # Generate benchmark report
+          python generate_benchmark_report.py
+          
+          # Extract the key metrics for summary
+          ACCURACY=$(jq -r '.accuracy' benchmark_metrics.json)
+          BEST_MODEL=$(jq -r '.best_model' benchmark_metrics.json)
+          TRAINING_TIME=$(jq -r '.training_time' benchmark_metrics.json)
+          
+          # Save metrics as outputs
+          echo "accuracy=${ACCURACY}" >> $GITHUB_OUTPUT
+          echo "best_model=${BEST_MODEL}" >> $GITHUB_OUTPUT
+          echo "training_time=${TRAINING_TIME}" >> $GITHUB_OUTPUT
+      
+      - name: Store benchmark results
+        uses: actions/upload-artifact@v3
+        with:
+          name: benchmark-${{ matrix.branch }}
+          path: |
+            ${{ env.WORKTREE_DIR }}/benchmark_metrics.json
+            ${{ env.WORKTREE_DIR }}/component_benchmarks.json
+            ${{ env.WORKTREE_DIR }}/pytest_benchmark.json
+            ${{ env.WORKTREE_DIR }}/benchmark_report.md
+            ${{ env.WORKTREE_DIR }}/model_performance_comparison.png
+      
+      - name: Record branch performance
+        run: |
+          cd $WORKTREE_DIR
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          
+          # Add metrics as git notes
+          echo "Accuracy: ${{ steps.benchmarks.outputs.accuracy }}" > metrics_note.txt
+          echo "Best model: ${{ steps.benchmarks.outputs.best_model }}" >> metrics_note.txt
+          echo "Training time: ${{ steps.benchmarks.outputs.training_time }}" >> metrics_note.txt
+          git notes add -F metrics_note.txt
+  
+  # Third job: Compare all evaluated branches
+  compare_branches:
+    needs: evaluate
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas matplotlib tabulate
+      
+      - name: Download all benchmark results
+        uses: actions/download-artifact@v3
+        with:
+          path: benchmark-results
+      
+      - name: Compare branches
+        run: |
+          # Create a script to combine and compare all benchmark results
+          cat > compare_branches.py << 'EOF'
+          import os
+          import glob
+          import json
+          import pandas as pd
+          import matplotlib.pyplot as plt
+          
+          def load_metrics_file(filepath):
+              try:
+                  with open(filepath, 'r') as f:
+                      return json.load(f)
+              except:
+                  return None
+          
+          # Find all benchmark metrics files
+          benchmark_dirs = glob.glob('benchmark-results/benchmark-*')
+          branch_metrics = {}
+          
+          for benchmark_dir in benchmark_dirs:
+              branch_name = benchmark_dir.split('-', 1)[1]
+              metrics_file = os.path.join(benchmark_dir, 'benchmark_metrics.json')
+              
+              metrics = load_metrics_file(metrics_file)
+              if metrics:
+                  branch_metrics[branch_name] = {
+                      'accuracy': metrics.get('accuracy', 0),
+                      'training_time': metrics.get('training_time', 0),
+                      'best_model': metrics.get('best_model', 'unknown')
+                  }
+          
+          # Create comparison table
+          if branch_metrics:
+              df = pd.DataFrame.from_dict(branch_metrics, orient='index')
+              print("\n=== Branch Comparison ===")
+              print(df)
+              
+              # Save comparison to file
+              with open('branch_comparison.md', 'w') as f:
+                  f.write("# Algorithm Branch Comparison\n\n")
+                  f.write(df.to_markdown())
+                  
+                  # Identify best branch
+                  if 'accuracy' in df.columns:
+                      best_branch = df['accuracy'].idxmax()
+                      f.write(f"\n\n## Best Branch: {best_branch}\n")
+                      f.write(f"- Accuracy: {df.loc[best_branch, 'accuracy']}\n")
+                      f.write(f"- Training Time: {df.loc[best_branch, 'training_time']}\n")
+                      f.write(f"- Best Model: {df.loc[best_branch, 'best_model']}\n")
+              
+              # Create comparison chart
+              fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+              
+              df['accuracy'].plot.bar(ax=axes[0], title='Accuracy Comparison')
+              axes[0].set_ylim([df['accuracy'].min() * 0.95, min(1.0, df['accuracy'].max() * 1.05)])
+              
+              df['training_time'].plot.bar(ax=axes[1], title='Training Time Comparison')
+              
+              plt.tight_layout()
+              plt.savefig('branch_comparison.png')
+          else:
+              print("No benchmark metrics found")
+          EOF
+          
+          python compare_branches.py
+      
+      - name: Upload comparison results
+        uses: actions/upload-artifact@v3
+        with:
+          name: branch-comparison
+          path: |
+            branch_comparison.md
+            branch_comparison.png
+      
+      - name: Display best branch
+        run: |
+          echo "See branch comparison results in the artifacts"
+          if [ -f branch_comparison.md ]; then
+            cat branch_comparison.md
+          fi 

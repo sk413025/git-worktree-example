@@ -1,0 +1,117 @@
+name: AlphaEvolve - Merge Best Candidate
+
+# Run after evaluations complete or manually
+on:
+  # Run when evaluate_candidates workflow completes
+  workflow_run:
+    workflows: ["Algorithm Evaluator Pool"]
+    types:
+      - completed
+  
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      benchmark_dir:
+        description: 'Path to benchmark results directory'
+        required: false
+        default: 'benchmark-results'
+      target_branch:
+        description: 'Branch to merge into'
+        required: false
+        default: 'experiment_ensemble'
+      metric:
+        description: 'Metric to use for selection'
+        required: false
+        default: 'accuracy'
+      dry_run:
+        description: 'Only identify best branch without merging'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  merge_best_candidate:
+    runs-on: ubuntu-latest
+    # Only run if the evaluation workflow succeeded
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Fetch all history and branches
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas matplotlib
+      
+      - name: Download benchmark results
+        uses: actions/download-artifact@v3
+        with:
+          path: benchmark-results
+        if: ${{ github.event_name == 'workflow_run' }}
+      
+      # Set parameters based on the event type
+      - name: Set parameters
+        id: params
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "benchmark_dir=${{ github.event.inputs.benchmark_dir }}" >> $GITHUB_OUTPUT
+            echo "target_branch=${{ github.event.inputs.target_branch }}" >> $GITHUB_OUTPUT
+            echo "metric=${{ github.event.inputs.metric }}" >> $GITHUB_OUTPUT
+            echo "dry_run=${{ github.event.inputs.dry_run }}" >> $GITHUB_OUTPUT
+          else
+            echo "benchmark_dir=benchmark-results" >> $GITHUB_OUTPUT
+            echo "target_branch=experiment_ensemble" >> $GITHUB_OUTPUT
+            echo "metric=accuracy" >> $GITHUB_OUTPUT
+            echo "dry_run=false" >> $GITHUB_OUTPUT
+          fi
+      
+      # Set up git identity for merge
+      - name: Configure Git
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+      
+      # Run the merge script
+      - name: Identify and merge best branch
+        run: |
+          python .github/scripts/merge_best_branch.py \
+            --benchmark-dir ${{ steps.params.outputs.benchmark_dir }} \
+            --target-branch ${{ steps.params.outputs.target_branch }} \
+            --metric ${{ steps.params.outputs.metric }} \
+            ${{ steps.params.outputs.dry_run == 'true' && '--dry-run' || '' }}
+      
+      # Push the merged branch if not dry run
+      - name: Push merged branch
+        if: ${{ steps.params.outputs.dry_run != 'true' }}
+        run: |
+          git push origin ${{ steps.params.outputs.target_branch }}
+      
+      # Create summary report of the merge decision
+      - name: Create summary
+        run: |
+          echo "# AlphaEvolve - Merge Decision" > merge_summary.md
+          echo "" >> merge_summary.md
+          echo "## Parameters" >> merge_summary.md
+          echo "- Target Branch: ${{ steps.params.outputs.target_branch }}" >> merge_summary.md
+          echo "- Selection Metric: ${{ steps.params.outputs.metric }}" >> merge_summary.md
+          echo "- Dry Run: ${{ steps.params.outputs.dry_run }}" >> merge_summary.md
+          echo "" >> merge_summary.md
+          echo "## Results" >> merge_summary.md
+          echo "See job logs for detailed results and merge status." >> merge_summary.md
+          
+          cat merge_summary.md
+      
+      # Upload merge summary
+      - name: Upload merge summary
+        uses: actions/upload-artifact@v3
+        with:
+          name: merge-summary
+          path: merge_summary.md 
