@@ -61,23 +61,27 @@ jobs:
       
       - name: Create worktree for branch
         run: |
-          git worktree add ../candidate-${{ matrix.branch }} ${{ matrix.branch }}
+          WORKTREE_PATH="../candidate-$(echo ${{ matrix.branch }} | sed 's|/|-|g')"
+          git worktree add $WORKTREE_PATH ${{ matrix.branch }}
       
       - name: Run benchmarks
         run: |
-          cd ../candidate-${{ matrix.branch }}
+          WORKTREE_PATH="../candidate-$(echo ${{ matrix.branch }} | sed 's|/|-|g')"
+          cd $WORKTREE_PATH
           python benchmark.py --output-json benchmark_metrics.json
           python benchmark_metrics.py --component-level
       
       - name: Run tests
         run: |
-          cd ../candidate-${{ matrix.branch }}
+          WORKTREE_PATH="../candidate-$(echo ${{ matrix.branch }} | sed 's|/|-|g')"
+          cd $WORKTREE_PATH
           pytest test_model.py -v
           pytest test_benchmarks.py --benchmark-json pytest_benchmark.json
       
       - name: Generate benchmark report
         run: |
-          cd ../candidate-${{ matrix.branch }}
+          WORKTREE_PATH="../candidate-$(echo ${{ matrix.branch }} | sed 's|/|-|g')"
+          cd $WORKTREE_PATH
           python generate_benchmark_report.py
       
       - name: Upload metrics as artifact
@@ -85,14 +89,15 @@ jobs:
         with:
           name: metrics-${{ matrix.branch }}
           path: |
-            ../candidate-${{ matrix.branch }}/benchmark_metrics.json
-            ../candidate-${{ matrix.branch }}/component_benchmarks.json
-            ../candidate-${{ matrix.branch }}/pytest_benchmark.json
-            ../candidate-${{ matrix.branch }}/benchmark_report.md
+            ../candidate-$(echo ${{ matrix.branch }} | sed 's|/|-|g')/benchmark_metrics.json
+            ../candidate-$(echo ${{ matrix.branch }} | sed 's|/|-|g')/component_benchmarks.json
+            ../candidate-$(echo ${{ matrix.branch }} | sed 's|/|-|g')/pytest_benchmark.json
+            ../candidate-$(echo ${{ matrix.branch }} | sed 's|/|-|g')/benchmark_report.md
       
       - name: Store score in git notes
         run: |
-          cd ../candidate-${{ matrix.branch }}
+          WORKTREE_PATH="../candidate-$(echo ${{ matrix.branch }} | sed 's|/|-|g')"
+          cd $WORKTREE_PATH
           SCORE=$(jq '.total_score' benchmark_metrics.json)
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
