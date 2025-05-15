@@ -1,0 +1,1 @@
+{"accuracy": 0.95, "training_time": 7.574582099914551, "best_model": "SVM", "best_params": {"C": 1.0, "gamma": "scale", "kernel": "linear"}, "original_features": 10, "engineered_features": 56, "model_performances": {"Random Forest": {"cv_accuracy": 0.9262106577304685}, "Gradient Boosting": {"cv_accuracy": 0.9449888766860973}, "SVM": {"cv_accuracy": 0.949992021251631}}}
