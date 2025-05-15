@@ -4,11 +4,11 @@
 
 ## 实验介绍
 
-我们将实现三种不同的机器学习实验：
+我们实现了三种不同的机器学习实验：
 1. **基础模型实验** - 使用默认参数的随机森林分类器
-2. **参数调优实验** - 调整随机森林超参数
-3. **特征工程实验** - 对数据进行特征工程处理
-4. **模型选择实验** - 使用不同的模型算法
+2. **参数调优实验** - 使用网格搜索调整随机森林超参数
+3. **特征工程实验** - 对数据进行特征工程处理，包括标准化和多项式特征
+4. **模型选择实验** - 比较多种不同的模型算法，选择最佳模型
 
 ## 如何使用 Git Worktree
 
@@ -25,8 +25,96 @@ git worktree add ../experiment_name experiment_name
 
 # 移除worktree
 git worktree remove ../experiment_name
+
+# 查看所有工作树
+git worktree list
 ```
+
+## 完整工作流程示例
+
+以下是使用 git worktree 管理机器学习实验的完整工作流程：
+
+1. **创建基础实验**
+   ```bash
+   # 初始化仓库
+   git init
+   
+   # 添加基础代码并提交
+   git add .
+   git commit -m "Initial commit with base ML model"
+   ```
+
+2. **创建实验分支**
+   ```bash
+   # 创建超参数调优实验分支
+   git checkout -b experiment_hyperparameter
+   # 修改代码...
+   git commit -am "Add hyperparameter tuning experiment"
+   
+   # 创建特征工程实验分支
+   git checkout master
+   git checkout -b experiment_feature_engineering
+   # 修改代码...
+   git commit -am "Add feature engineering experiment"
+   
+   # 创建模型选择实验分支
+   git checkout master
+   git checkout -b experiment_model_selection
+   # 修改代码...
+   git commit -am "Add model selection experiment"
+   ```
+
+3. **创建工作树**
+   ```bash
+   git checkout master
+   
+   # 创建工作树目录
+   mkdir -p ../git-worktree-example-experiments
+   
+   # 为每个实验创建工作树
+   git worktree add ../git-worktree-example-experiments/experiment_hyperparameter experiment_hyperparameter
+   git worktree add ../git-worktree-example-experiments/experiment_feature_engineering experiment_feature_engineering
+   git worktree add ../git-worktree-example-experiments/experiment_model_selection experiment_model_selection
+   
+   # 查看工作树列表
+   git worktree list
+   ```
+
+4. **运行实验**
+   ```bash
+   # 运行基础实验
+   cd /path/to/master/branch
+   python train.py
+   
+   # 运行超参数调优实验
+   cd ../git-worktree-example-experiments/experiment_hyperparameter
+   python train.py
+   
+   # 运行特征工程实验
+   cd ../experiment_feature_engineering
+   python train.py
+   
+   # 运行模型选择实验
+   cd ../experiment_model_selection
+   python train.py
+   ```
+
+5. **比较实验结果**
+   ```bash
+   cd /path/to/master/branch
+   python compare_experiments.py
+   ```
 
 ## 实验结果比较
 
-实验完成后，我们将比较各个实验的性能指标，包括准确率、训练时间等。 
+实验完成后，我们比较各个实验的性能指标，包括准确率、训练时间等。比较结果会生成一个图表，帮助我们直观地理解不同实验的效果。
+
+## 优势
+
+使用 git worktree 管理机器学习实验有以下优势：
+
+1. **并行工作** - 可以同时在多个实验上工作，无需频繁切换分支
+2. **结果比较** - 所有实验结果可以在文件系统中并排比较
+3. **代码隔离** - 每个实验的代码变更互不影响
+4. **版本控制** - 所有实验都受到 Git 版本控制的保护
+5. **易于协作** - 团队成员可以在不同的实验分支上并行工作 

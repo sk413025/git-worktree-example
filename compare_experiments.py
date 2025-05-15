@@ -16,6 +16,8 @@ def load_metrics(experiment_dirs):
             with open(metrics_path, 'r') as f:
                 metrics = json.load(f)
                 all_metrics[exp_name] = metrics
+        else:
+            print(f"Warning: No metrics.json found in {exp_dir}")
     
     return all_metrics
 
@@ -62,11 +64,15 @@ if __name__ == "__main__":
     # Experiment directories to compare
     experiment_dirs = [
         ".",  # Base experiment
-        "../experiment_hyperparameter",
-        "../experiment_feature_engineering",
-        "../experiment_model_selection"
+        "../git-worktree-example-experiments/experiment_hyperparameter",
+        "../git-worktree-example-experiments/experiment_feature_engineering",
+        "../git-worktree-example-experiments/experiment_model_selection"
     ]
     
     # Load and compare metrics
     metrics = load_metrics(experiment_dirs)
-    compare_metrics(metrics) 
+    
+    if metrics:
+        compare_metrics(metrics)
+    else:
+        print("No metrics found to compare. Please run the experiments first.") 
