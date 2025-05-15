@@ -1,36 +1,18 @@
-name: AlphaEvolve - Merge Best Candidate
+name: Merge Best Algorithm Candidate
 
 # Run after evaluations complete or manually
 on:
   # Run when evaluate_candidates workflow completes
   workflow_run:
-    workflows: ["Algorithm Evaluator Pool"]
+    workflows: ["Evaluate Algorithm Candidates"]
     types:
       - completed
   
   # Allow manual trigger
   workflow_dispatch:
-    inputs:
-      benchmark_dir:
-        description: 'Path to benchmark results directory'
-        required: false
-        default: 'benchmark-results'
-      target_branch:
-        description: 'Branch to merge into'
-        required: false
-        default: 'experiment_ensemble'
-      metric:
-        description: 'Metric to use for selection'
-        required: false
-        default: 'accuracy'
-      dry_run:
-        description: 'Only identify best branch without merging'
-        required: false
-        default: 'false'
-        type: boolean
 
 jobs:
-  merge_best_candidate:
+  compare-and-merge:
     runs-on: ubuntu-latest
     # Only run if the evaluation workflow succeeded
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
@@ -40,22 +22,19 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0  # Fetch all history and branches
+          token: ${{ secrets.GITHUB_TOKEN }}
       
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.12'
+          python-version: '3.10'
       
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pandas matplotlib
-      
-      - name: Download benchmark results
-        uses: actions/download-artifact@v3
+      - name: Download all artifacts
+        uses: dawidd6/action-download-artifact@v2
         with:
-          path: benchmark-results
-        if: ${{ github.event_name == 'workflow_run' }}
+          workflow: evaluate_candidates.yml
+          workflow_conclusion: success
+          path: artifacts
       
       # Set parameters based on the event type
       - name: Set parameters
@@ -80,19 +59,118 @@ jobs:
           git config --global user.email "actions@github.com"
       
       # Run the merge script
-      - name: Identify and merge best branch
+      - name: Find best branch
+        id: find-best
         run: |
-          python .github/scripts/merge_best_branch.py \
-            --benchmark-dir ${{ steps.params.outputs.benchmark_dir }} \
-            --target-branch ${{ steps.params.outputs.target_branch }} \
-            --metric ${{ steps.params.outputs.metric }} \
-            ${{ steps.params.outputs.dry_run == 'true' && '--dry-run' || '' }}
+          # Create script to find best branch
+          cat > find_best_branch.py << 'EOF'
+          import json
+          import os
+          import glob
+          
+          def find_best_branch():
+              metrics_files = glob.glob('artifacts/metrics-*/benchmark_metrics.json')
+              
+              if not metrics_files:
+                  print("No metrics files found")
+                  return None, 0
+              
+              best_branch = None
+              best_score = float('-inf')
+              
+              for metrics_file in metrics_files:
+                  # Extract branch name from directory pattern artifacts/metrics-{branch}/...
+                  branch = metrics_file.split('/')[1].replace('metrics-', '')
+                  
+                  try:
+                      with open(metrics_file, 'r') as f:
+                          data = json.load(f)
+                          score = data.get('total_score', 0)
+                          accuracy = data.get('accuracy', 0)
+                          
+                          # Can adjust scoring logic as needed
+                          total_score = score if score else accuracy
+                          
+                          print(f"Branch {branch}: Score = {total_score}")
+                          
+                          if total_score > best_score:
+                              best_score = total_score
+                              best_branch = branch
+                  except Exception as e:
+                      print(f"Error processing {metrics_file}: {e}")
+              
+              return best_branch, best_score
+          
+          if __name__ == "__main__":
+              best_branch, best_score = find_best_branch()
+              if best_branch:
+                  print(f"::set-output name=best_branch::{best_branch}")
+                  print(f"::set-output name=best_score::{best_score}")
+                  # Also use the new GitHub Actions output syntax
+                  with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                      f.write(f"best_branch={best_branch}\n")
+                      f.write(f"best_score={best_score}\n")
+              else:
+                  print("No best branch found")
+                  exit(1)
+          EOF
+          
+          python find_best_branch.py
       
-      # Push the merged branch if not dry run
-      - name: Push merged branch
-        if: ${{ steps.params.outputs.dry_run != 'true' }}
+      - name: Create comparison PR
+        if: steps.find-best.outputs.best_branch != ''
         run: |
-          git push origin ${{ steps.params.outputs.target_branch }}
+          BEST_BRANCH="${{ steps.find-best.outputs.best_branch }}"
+          BEST_SCORE="${{ steps.find-best.outputs.best_score }}"
+          PR_BRANCH="merge-best-candidate-${GITHUB_RUN_ID}"
+          
+          echo "Best branch: $BEST_BRANCH with score: $BEST_SCORE"
+          
+          # Create a new branch for the PR
+          git checkout -b $PR_BRANCH
+          
+          # Copy benchmark report from the best branch
+          cp "artifacts/metrics-$BEST_BRANCH/benchmark_report.md" ./best_candidate_report.md
+          
+          # Create summary markdown file
+          cat > best_candidate_summary.md << EOF
+          # Best Algorithm Candidate
+          
+          This PR merges the best performing algorithm candidate from the AlphaEvolve workflow.
+          
+          - **Branch:** $BEST_BRANCH
+          - **Score:** $BEST_SCORE
+          
+          See [best_candidate_report.md](./best_candidate_report.md) for detailed metrics.
+          EOF
+          
+          # Add files to git
+          git add best_candidate_report.md best_candidate_summary.md
+          git commit -m "Add benchmark reports for best candidate ($BEST_BRANCH)"
+          
+          # Push branch
+          git push origin $PR_BRANCH
+          
+          # Create PR using gh CLI
+          gh pr create \
+            --title "Merge best algorithm candidate: $BEST_BRANCH" \
+            --body-file best_candidate_summary.md \
+            --base main \
+            --head $PR_BRANCH
+      
+      - name: Auto-merge if threshold met
+        if: steps.find-best.outputs.best_branch != '' && steps.find-best.outputs.best_score >= 0.95
+        run: |
+          BEST_BRANCH="${{ steps.find-best.outputs.best_branch }}"
+          
+          # Checkout main branch
+          git checkout main
+          
+          # Merge the best branch with a merge commit
+          git merge --no-ff $BEST_BRANCH -m "Auto-merge best algorithm: $BEST_BRANCH (score: ${{ steps.find-best.outputs.best_score }})"
+          
+          # Push to main
+          git push origin main
       
       # Create summary report of the merge decision
       - name: Create summary

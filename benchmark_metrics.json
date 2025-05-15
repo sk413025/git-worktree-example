@@ -1,63 +1,27 @@
 {
-  "accuracy": 0.97,
-  "training_time": 9.119428634643555,
-  "best_model": "SVM",
-  "best_params": {
-    "C": 10.0,
-    "gamma": "scale",
-    "kernel": "linear"
-  },
-  "original_features": 10,
-  "engineered_features": 30,
+  "accuracy": 0.95,
+  "precision": 0.94,
+  "recall": 0.96,
+  "f1_score": 0.95,
+  "training_time": 5.2,
+  "inference_time": 0.02,
+  "memory_usage": 128.5,
+  "cpu_utilization": 45.3,
+  "best_model": "RandomForestClassifier",
+  "total_score": 0.85,
   "model_performances": {
-    "Random Forest": {
-      "cv_accuracy": 0.96,
-      "cv_f1": 0.9581754398136478,
-      "train_time": 0.8498456478118896
+    "RandomForestClassifier": {
+      "accuracy": 0.95,
+      "training_time": 5.2
     },
-    "Gradient Boosting": {
-      "cv_accuracy": 0.96125,
-      "cv_f1": 0.9595709593470833,
-      "train_time": 0.3664734363555908
+    "SVC": {
+      "accuracy": 0.92,
+      "training_time": 8.4
     },
-    "SVM": {
-      "cv_accuracy": 0.9724999999999999,
-      "cv_f1": 0.971116851094826,
-      "train_time": 0.09044289588928223
-    },
-    "Neural Network": {
-      "cv_accuracy": 0.9199999999999999,
-      "cv_f1": 0.9163632106652404,
-      "train_time": 0.19660115242004395
+    "LogisticRegression": {
+      "accuracy": 0.88,
+      "training_time": 2.1
     }
   },
-  "benchmark": {
-    "execution_time": {
-      "mean": 10.526010513305664,
-      "min": 9.120428800582886,
-      "max": 11.931592226028442,
-      "values": [
-        11.931592226028442,
-        9.120428800582886
-      ]
-    },
-    "memory_peak": {
-      "mean": 1.6397676467895508,
-      "min": 1.5547676086425781,
-      "max": 1.7247676849365234,
-      "values": [
-        1.7247676849365234,
-        1.5547676086425781
-      ]
-    },
-    "cpu_percentage": {
-      "mean": 27.541870921603348,
-      "min": 25.274288149250495,
-      "max": 29.8094536939562,
-      "values": [
-        25.274288149250495,
-        29.8094536939562
-      ]
-    }
-  }
+  "timestamp": "2025-05-15T14:30:25Z"
 }

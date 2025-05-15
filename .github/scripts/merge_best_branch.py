@@ -1,148 +1,148 @@
 #!/usr/bin/env python3
 """
-Merge Best Branch - AlphaEvolve Selection & Merge Policy
-
-This script:
-1. Loads benchmark results from all candidate branches
-2. Identifies the best-performing branch based on a configurable metric
-3. Automatically merges the best branch back to the target branch (e.g., main/experiment_ensemble)
-
-Usage:
-  python merge_best_branch.py --target-branch experiment_ensemble --metric accuracy
+Identifies the best algorithm branch based on benchmark metrics and optionally merges it.
+Part of the AlphaEvolve workflow's evaluator pool and selection policy.
 """
 
+import argparse
+import json
 import os
 import glob
-import json
-import argparse
 import subprocess
-import pandas as pd
+from pathlib import Path
 
-def load_metrics_file(filepath):
-    """Load metrics JSON file."""
+
+def run_command(cmd, capture_output=True):
+    """Run a shell command and return the output."""
+    print(f"Running: {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=capture_output, text=True)
+    if result.returncode != 0:
+        print(f"Command failed with exit code {result.returncode}")
+        if capture_output:
+            print(f"Error: {result.stderr}")
+        return None
+    return result.stdout.strip() if capture_output else True
+
+
+def load_metrics_file(file_path):
+    """Load metrics from a JSON file."""
     try:
-        with open(filepath, 'r') as f:
+        with open(file_path, 'r') as f:
             return json.load(f)
     except Exception as e:
-        print(f"Error loading {filepath}: {e}")
+        print(f"Error loading {file_path}: {e}")
         return None
 
-def run_command(command, capture_output=True):
-    """Run a shell command and return output."""
-    result = subprocess.run(command, shell=True, capture_output=capture_output, text=True)
-    if result.returncode != 0 and capture_output:
-        print(f"Command failed: {command}")
-        print(f"Error: {result.stderr}")
-    return result
 
-def get_branch_metrics(benchmark_dirs):
-    """Get metrics for all branches from benchmark directories."""
-    branch_metrics = {}
+def find_metrics_files(benchmark_dir, pattern='benchmark_metrics.json'):
+    """Find all metrics files in the benchmark directory."""
+    if not os.path.isdir(benchmark_dir):
+        print(f"Benchmark directory '{benchmark_dir}' does not exist.")
+        return []
     
-    for benchmark_dir in benchmark_dirs:
-        # Extract branch name from directory name
-        branch_name = os.path.basename(benchmark_dir).split('-', 1)[1]
-        metrics_file = os.path.join(benchmark_dir, 'benchmark_metrics.json')
+    # Look for metrics files in subdirectories
+    return glob.glob(os.path.join(benchmark_dir, f"**/{pattern}"), recursive=True)
+
+
+def find_best_branch(benchmark_dir, metric='accuracy', reverse=True):
+    """
+    Find the best branch based on the specified metric.
+    
+    Args:
+        benchmark_dir: Directory containing benchmark results
+        metric: Metric to use for comparison (default: accuracy)
+        reverse: If True, higher is better (e.g., accuracy); if False, lower is better (e.g., time)
         
-        metrics = load_metrics_file(metrics_file)
-        if metrics:
-            # Extract key metrics
-            branch_metrics[branch_name] = {
-                'accuracy': metrics.get('accuracy', 0),
-                'training_time': metrics.get('training_time', float('inf')),
-                'best_model': metrics.get('best_model', 'unknown')
-            }
+    Returns:
+        Tuple of (best_branch, best_value)
+    """
+    metrics_files = find_metrics_files(benchmark_dir)
+    
+    if not metrics_files:
+        print(f"No metrics files found in '{benchmark_dir}'")
+        return None, None
+    
+    best_branch = None
+    best_value = float('-inf') if reverse else float('inf')
+    
+    for file_path in metrics_files:
+        # Extract branch name from directory structure
+        # Expected format: benchmark_dir/metrics-{branch}/benchmark_metrics.json
+        branch = os.path.basename(os.path.dirname(file_path))
+        if branch.startswith('metrics-'):
+            branch = branch[len('metrics-'):]
+        
+        metrics = load_metrics_file(file_path)
+        if not metrics:
+            continue
+        
+        # Check if the metric exists in this file
+        if metric in metrics:
+            value = float(metrics[metric])
+            print(f"Branch {branch}: {metric} = {value}")
             
-            # Get additional metrics from benchmark section if available
-            if 'benchmark' in metrics:
-                benchmark = metrics['benchmark']
-                if 'execution_time' in benchmark:
-                    branch_metrics[branch_name]['execution_time'] = benchmark['execution_time'].get('mean', float('inf'))
-                if 'memory_peak' in benchmark:
-                    branch_metrics[branch_name]['memory_peak'] = benchmark['memory_peak'].get('mean', float('inf'))
+            if (reverse and value > best_value) or (not reverse and value < best_value):
+                best_value = value
+                best_branch = branch
     
-    return branch_metrics
+    return best_branch, best_value
 
-def find_best_branch(metrics, metric_name='accuracy', higher_is_better=True):
-    """Find the best branch based on the specified metric."""
-    if not metrics:
-        return None
-    
-    df = pd.DataFrame.from_dict(metrics, orient='index')
-    
-    # Check if metric exists
-    if metric_name not in df.columns:
-        print(f"Metric '{metric_name}' not found. Available metrics: {list(df.columns)}")
-        return None
-    
-    # Find best branch
-    if higher_is_better:
-        best_branch = df[metric_name].idxmax()
-    else:
-        best_branch = df[metric_name].idxmin()
-    
-    return best_branch, df.loc[best_branch].to_dict()
 
-def merge_branch(branch_name, target_branch):
+def merge_branch(branch, target_branch, message=None):
     """Merge the specified branch into the target branch."""
-    # Checkout target branch
-    result = run_command(f"git checkout {target_branch}")
-    if result.returncode != 0:
-        print(f"Failed to checkout {target_branch}")
+    # Make sure we're on the target branch
+    if not run_command(['git', 'checkout', target_branch]):
         return False
     
-    # Merge branch with no fast-forward
-    message = f"Merge branch '{branch_name}' - AlphaEvolve automated selection"
-    result = run_command(f"git merge --no-ff {branch_name} -m \"{message}\"")
+    # Create a merge commit
+    merge_cmd = ['git', 'merge', '--no-ff', branch]
+    if message:
+        merge_cmd.extend(['-m', message])
     
-    if result.returncode != 0:
-        print(f"Failed to merge {branch_name} into {target_branch}. Manual intervention needed.")
-        return False
-    
-    print(f"Successfully merged {branch_name} into {target_branch}")
-    return True
+    return run_command(merge_cmd, capture_output=False)
+
 
 def main():
-    # Parse command-line arguments
-    parser = argparse.ArgumentParser(description="AlphaEvolve - Merge best branch based on metrics")
-    parser.add_argument("--benchmark-dir", default="benchmark-results", help="Directory containing benchmark results")
-    parser.add_argument("--target-branch", default="experiment_ensemble", help="Branch to merge into")
-    parser.add_argument("--metric", default="accuracy", help="Metric to use for selection")
-    parser.add_argument("--higher-is-better", action="store_true", default=True, help="Whether higher metric values are better")
-    parser.add_argument("--dry-run", action="store_true", help="Only identify best branch without merging")
+    parser = argparse.ArgumentParser(description='Find and merge the best algorithm branch')
+    parser.add_argument('--benchmark-dir', required=True, help='Directory containing benchmark results')
+    parser.add_argument('--target-branch', default='main', help='Branch to merge into (default: main)')
+    parser.add_argument('--metric', default='accuracy', help='Metric to use for selecting the best branch (default: accuracy)')
+    parser.add_argument('--reverse', action='store_true', default=True, help='Whether higher values are better (default: True)')
+    parser.add_argument('--dry-run', action='store_true', help='Only identify the best branch without merging')
     
     args = parser.parse_args()
     
-    # Find benchmark directories
-    benchmark_dirs = glob.glob(f"{args.benchmark_dir}/benchmark-*")
-    if not benchmark_dirs:
-        print(f"No benchmark results found in {args.benchmark_dir}")
+    # Adjust reverse flag based on metric
+    if args.metric in ['training_time', 'inference_time', 'memory_usage', 'error_rate']:
+        args.reverse = False
+    
+    # Find the best branch
+    best_branch, best_value = find_best_branch(args.benchmark_dir, args.metric, args.reverse)
+    
+    if not best_branch:
+        print("No best branch found.")
         return 1
     
-    # Get metrics for all branches
-    branch_metrics = get_branch_metrics(benchmark_dirs)
-    
-    # Find best branch
-    result = find_best_branch(branch_metrics, args.metric, args.higher_is_better)
-    if result is None:
-        print("No best branch found")
-        return 1
-    
-    best_branch, best_metrics = result
-    
-    # Print result
-    print(f"Best branch: {best_branch}")
-    for metric, value in best_metrics.items():
-        print(f"- {metric}: {value}")
+    print(f"\nBest branch based on {args.metric}: {best_branch} (value: {best_value})")
     
     # Merge if not dry run
-    if args.dry_run:
-        print("Dry run - not merging")
+    if not args.dry_run:
+        print(f"\nMerging {best_branch} into {args.target_branch}...")
+        
+        message = f"Merge branch '{best_branch}' as best algorithm candidate\n\n" \
+                 f"- {args.metric}: {best_value}\n" \
+                 f"- Selected by AlphaEvolve evaluator pool"
+        
+        if merge_branch(best_branch, args.target_branch, message):
+            print(f"Successfully merged {best_branch} into {args.target_branch}")
+            return 0
+        else:
+            print(f"Failed to merge {best_branch}")
+            return 1
+    else:
+        print(f"Dry run - would merge {best_branch} into {args.target_branch}")
         return 0
-    
-    # Merge best branch
-    success = merge_branch(best_branch, args.target_branch)
-    return 0 if success else 1
+
 
 if __name__ == "__main__":
     exit(main()) 

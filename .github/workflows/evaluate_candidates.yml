@@ -1,4 +1,4 @@
-name: Algorithm Evaluator Pool
+name: Evaluate Algorithm Candidates
 
 on:
   # Triggered when a new branch with the prefix 'evolve/' is pushed
@@ -12,128 +12,93 @@ on:
       branches:
         description: 'Comma-separated list of branches to evaluate'
         required: false
-        default: 'experiment_ensemble,evolve-*'
+        default: ''
 
 jobs:
-  # First job: Discover branches to evaluate
-  discover_branches:
+  detect-branches:
     runs-on: ubuntu-latest
     outputs:
       branches: ${{ steps.set-branches.outputs.branches }}
-    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0  # Fetch all history and branches
+          fetch-depth: 0
       
-      - name: Get branches to evaluate
+      - name: Set branches
         id: set-branches
         run: |
           if [[ -n "${{ github.event.inputs.branches }}" ]]; then
-            # Use manually specified branches for workflow_dispatch
-            BRANCHES="${{ github.event.inputs.branches }}"
+            # Use manually specified branches
+            echo "branches=$(echo ${{ github.event.inputs.branches }} | jq -R 'split(",")')" >> $GITHUB_OUTPUT
           else
-            # Get evolve branches plus experiment_ensemble branch
-            BRANCHES=$(git branch -r | grep -E 'origin/(evolve|experiment_ensemble)' | sed 's#origin/##' | tr '\n' ',' | sed 's/,$//')
+            # Auto-detect evolve branches
+            echo "branches=$(git branch -r | grep 'origin/evolve/' | sed 's|origin/||' | jq -R -s -c 'split("\n") | map(select(length > 0))')" >> $GITHUB_OUTPUT
           fi
-          echo "branches=${BRANCHES}" >> $GITHUB_OUTPUT
-          echo "Branches to evaluate: ${BRANCHES}"
 
-  # Second job: Evaluate each branch in parallel
   evaluate:
-    needs: discover_branches
+    needs: detect-branches
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        branch: ${{ fromJson(format('[{0}]', needs.discover_branches.outputs.branches)) }}
-        # Optional: Add more dimensions to the matrix if needed
-        # python-version: [3.8, 3.9]
-      fail-fast: false  # Continue evaluating other branches even if one fails
+        branch: ${{ fromJson(needs.detect-branches.outputs.branches) }}
+      fail-fast: false
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0  # Fetch all history
+          fetch-depth: 0
       
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.12'
+          python-version: '3.10'
           cache: 'pip'
       
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest pytest-benchmark tabulate
+        run: pip install -r requirements.txt
       
       - name: Create worktree for branch
         run: |
-          echo "Setting up worktree for ${{ matrix.branch }}"
-          # Create a unique directory name for this branch's worktree
-          WORKTREE_DIR="../candidate-${{ matrix.branch }}"
-          git worktree add $WORKTREE_DIR ${{ matrix.branch }}
-          echo "WORKTREE_DIR=${WORKTREE_DIR}" >> $GITHUB_ENV
-      
-      - name: Run unit tests
-        id: unit_tests
-        continue-on-error: true  # Don't fail the whole job if tests fail
-        run: |
-          cd $WORKTREE_DIR
-          python -m pytest test_model.py -v | tee test_output.log
-          echo "test_success=$?" >> $GITHUB_OUTPUT
+          git worktree add ../candidate-${{ matrix.branch }} ${{ matrix.branch }}
       
       - name: Run benchmarks
-        id: benchmarks
         run: |
-          cd $WORKTREE_DIR
-          # Run performance benchmarks
-          python benchmark.py
-          
-          # Run component benchmarks
-          python benchmark_metrics.py
-          
-          # Run pytest benchmarks and save to JSON
-          python -m pytest test_benchmarks.py --benchmark-json pytest_benchmark.json
-          
-          # Generate benchmark report
-          python generate_benchmark_report.py
-          
-          # Extract the key metrics for summary
-          ACCURACY=$(jq -r '.accuracy' benchmark_metrics.json)
-          BEST_MODEL=$(jq -r '.best_model' benchmark_metrics.json)
-          TRAINING_TIME=$(jq -r '.training_time' benchmark_metrics.json)
-          
-          # Save metrics as outputs
-          echo "accuracy=${ACCURACY}" >> $GITHUB_OUTPUT
-          echo "best_model=${BEST_MODEL}" >> $GITHUB_OUTPUT
-          echo "training_time=${TRAINING_TIME}" >> $GITHUB_OUTPUT
+          cd ../candidate-${{ matrix.branch }}
+          python benchmark.py --output-json benchmark_metrics.json
+          python benchmark_metrics.py --component-level
       
-      - name: Store benchmark results
+      - name: Run tests
+        run: |
+          cd ../candidate-${{ matrix.branch }}
+          pytest test_model.py -v
+          pytest test_benchmarks.py --benchmark-json pytest_benchmark.json
+      
+      - name: Generate benchmark report
+        run: |
+          cd ../candidate-${{ matrix.branch }}
+          python generate_benchmark_report.py
+      
+      - name: Upload metrics as artifact
         uses: actions/upload-artifact@v3
         with:
-          name: benchmark-${{ matrix.branch }}
+          name: metrics-${{ matrix.branch }}
           path: |
-            ${{ env.WORKTREE_DIR }}/benchmark_metrics.json
-            ${{ env.WORKTREE_DIR }}/component_benchmarks.json
-            ${{ env.WORKTREE_DIR }}/pytest_benchmark.json
-            ${{ env.WORKTREE_DIR }}/benchmark_report.md
-            ${{ env.WORKTREE_DIR }}/model_performance_comparison.png
+            ../candidate-${{ matrix.branch }}/benchmark_metrics.json
+            ../candidate-${{ matrix.branch }}/component_benchmarks.json
+            ../candidate-${{ matrix.branch }}/pytest_benchmark.json
+            ../candidate-${{ matrix.branch }}/benchmark_report.md
       
-      - name: Record branch performance
+      - name: Store score in git notes
         run: |
-          cd $WORKTREE_DIR
+          cd ../candidate-${{ matrix.branch }}
+          SCORE=$(jq '.total_score' benchmark_metrics.json)
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
-          
-          # Add metrics as git notes
-          echo "Accuracy: ${{ steps.benchmarks.outputs.accuracy }}" > metrics_note.txt
-          echo "Best model: ${{ steps.benchmarks.outputs.best_model }}" >> metrics_note.txt
-          echo "Training time: ${{ steps.benchmarks.outputs.training_time }}" >> metrics_note.txt
-          git notes add -F metrics_note.txt
-  
+          git notes add -m "score:$SCORE" HEAD
+          git push origin "refs/notes/*"
+
   # Third job: Compare all evaluated branches
   compare_branches:
     needs: evaluate
