@@ -1,27 +1,31 @@
 {
-  "accuracy": 0.95,
-  "precision": 0.94,
-  "recall": 0.96,
-  "f1_score": 0.95,
-  "training_time": 5.2,
-  "inference_time": 0.02,
-  "memory_usage": 128.5,
-  "cpu_utilization": 45.3,
-  "best_model": "RandomForestClassifier",
-  "total_score": 0.85,
+  "accuracy": 0.97,
+  "precision": 0.96,
+  "recall": 0.98,
+  "f1_score": 0.97,
+  "training_time": 4.8,
+  "inference_time": 0.015,
+  "memory_usage": 115.2,
+  "cpu_utilization": 42.1,
+  "best_model": "GradientBoostingClassifier",
+  "total_score": 0.92,
   "model_performances": {
     "RandomForestClassifier": {
-      "accuracy": 0.95,
-      "training_time": 5.2
+      "accuracy": 0.96,
+      "training_time": 5.1
+    },
+    "GradientBoostingClassifier": {
+      "accuracy": 0.97,
+      "training_time": 4.8
     },
     "SVC": {
-      "accuracy": 0.92,
-      "training_time": 8.4
+      "accuracy": 0.94,
+      "training_time": 7.5
     },
     "LogisticRegression": {
-      "accuracy": 0.88,
-      "training_time": 2.1
+      "accuracy": 0.89,
+      "training_time": 1.9
     }
   },
-  "timestamp": "2025-05-15T14:30:25Z"
+  "timestamp": "2025-05-15T15:10:18Z"
 }
