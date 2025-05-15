@@ -1,1 +1,34 @@
-{"accuracy": 0.95, "training_time": 7.574582099914551, "best_model": "SVM", "best_params": {"C": 1.0, "gamma": "scale", "kernel": "linear"}, "original_features": 10, "engineered_features": 56, "model_performances": {"Random Forest": {"cv_accuracy": 0.9262106577304685}, "Gradient Boosting": {"cv_accuracy": 0.9449888766860973}, "SVM": {"cv_accuracy": 0.949992021251631}}}
+{
+  "accuracy": 0.97,
+  "training_time": 10.814929246902466,
+  "best_model": "SVM",
+  "best_params": {
+    "C": 10.0,
+    "gamma": "scale",
+    "kernel": "linear"
+  },
+  "original_features": 10,
+  "engineered_features": 30,
+  "model_performances": {
+    "Random Forest": {
+      "cv_accuracy": 0.96,
+      "cv_f1": 0.9581754398136478,
+      "train_time": 0.3034069538116455
+    },
+    "Gradient Boosting": {
+      "cv_accuracy": 0.96125,
+      "cv_f1": 0.9595709593470833,
+      "train_time": 0.2433617115020752
+    },
+    "SVM": {
+      "cv_accuracy": 0.9724999999999999,
+      "cv_f1": 0.971116851094826,
+      "train_time": 0.09430885314941406
+    },
+    "Neural Network": {
+      "cv_accuracy": 0.9199999999999999,
+      "cv_f1": 0.9163632106652404,
+      "train_time": 0.10651040077209473
+    }
+  }
+}
