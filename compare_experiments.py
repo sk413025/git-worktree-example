@@ -93,7 +93,8 @@ if __name__ == "__main__":
         "../git-worktree-example-experiments/experiment_hyperparameter",
         "../git-worktree-example-experiments/experiment_feature_engineering",
         "../git-worktree-example-experiments/experiment_model_selection",
-        "../git-worktree-example-experiments/experiment_ensemble"  # New ensemble experiment
+        "../git-worktree-example-experiments/experiment_ensemble",  # New ensemble experiment
+        "../candidate-20250515135425"  # Our new improved algorithm
     ]
     
     # Load and compare metrics
